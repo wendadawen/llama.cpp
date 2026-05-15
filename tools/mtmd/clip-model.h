@@ -466,7 +466,7 @@ struct clip_model {
     ggml_tensor * mm_boi = nullptr;
     ggml_tensor * mm_eoi = nullptr;
 
-    // hunyuanocr perceiver
+    // hunyuanvl perceiver
     ggml_tensor * mm_pre_norm_w  = nullptr;
     ggml_tensor * mm_img_begin   = nullptr;
     ggml_tensor * mm_img_end     = nullptr;
