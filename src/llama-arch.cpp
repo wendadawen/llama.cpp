@@ -293,6 +293,7 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
     { LLM_KV_DFLASH_TARGET_LAYER_IDS,     "%s.target_layer_ids"     },
     { LLM_KV_DFLASH_BLOCK_SIZE,           "%s.block_size"           },
     { LLM_KV_DFLASH_MASK_TOKEN_ID,        "%s.mask_token_id"        },
+    { LLM_KV_DFLASH_QK_NORM_AFTER_ROPE,   "%s.qk_norm_after_rope"   },
 
     { LLM_KV_SHORTCONV_L_CACHE, "%s.shortconv.l_cache" },
     // sentence-transformers dense modules feature dims

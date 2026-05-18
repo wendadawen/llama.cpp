@@ -2793,19 +2793,29 @@ void llama_model::load_hparams(llama_model_loader & ml) {
 
                 ml.get_key(LLM_KV_DFLASH_BLOCK_SIZE, hparams.dflash_block_size, false);
                 ml.get_key(LLM_KV_DFLASH_MASK_TOKEN_ID, hparams.dflash_mask_token_id, false);
+                ml.get_key(LLM_KV_DFLASH_QK_NORM_AFTER_ROPE, hparams.dflash_qk_norm_after_rope, false);
 
-                if (!ml.get_key_or_arr(LLM_KV_DFLASH_TARGET_LAYER_IDS, hparams.dflash_target_layer_ids, 5, false)) {
+                // get_arr accepts arrays of length <= N_MAX (5); HunYuan-style draft uses 4 layers,
+                // POC Qwen3-style draft uses 5. Unfilled slots remain default-initialized to 0.
+                if (!ml.get_arr(LLM_KV_DFLASH_TARGET_LAYER_IDS, hparams.dflash_target_layer_ids, false)) {
                     throw std::runtime_error("DFlash model requires 'target_layer_ids' in GGUF metadata");
                 }
-                LLAMA_LOG_INFO("%s: DFlash extract_layers = [%d, %d, %d, %d, %d]\n", __func__,
-                               hparams.dflash_target_layer_ids[0],
-                               hparams.dflash_target_layer_ids[1],
-                               hparams.dflash_target_layer_ids[2],
-                               hparams.dflash_target_layer_ids[3],
-                               hparams.dflash_target_layer_ids[4]);
+                ml.get_arr_n(LLM_KV_DFLASH_TARGET_LAYER_IDS, hparams.dflash_n_target_layers);
 
-                LLAMA_LOG_INFO("%s: DFlash block_size = %u, mask_token_id = %u\n",
-                               __func__, hparams.dflash_block_size, hparams.dflash_mask_token_id);
+                {
+                    std::string s = "[";
+                    for (uint32_t i = 0; i < hparams.dflash_n_target_layers; ++i) {
+                        if (i) s += ", ";
+                        s += std::to_string(hparams.dflash_target_layer_ids[i]);
+                    }
+                    s += "]";
+                    LLAMA_LOG_INFO("%s: DFlash extract_layers (%u) = %s\n", __func__,
+                                   hparams.dflash_n_target_layers, s.c_str());
+                }
+
+                LLAMA_LOG_INFO("%s: DFlash block_size = %u, mask_token_id = %u, qk_norm_after_rope = %d\n",
+                               __func__, hparams.dflash_block_size, hparams.dflash_mask_token_id,
+                               (int)hparams.dflash_qk_norm_after_rope);
 
                 type = LLM_TYPE_UNKNOWN;
             } break;
@@ -7365,7 +7375,7 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                 } break;
             case LLM_ARCH_DFLASH:
                 {
-                    const int64_t n_target_layer_ids = (int64_t)hparams.dflash_target_layer_ids.size();
+                    const int64_t n_target_layer_ids = (int64_t)hparams.dflash_n_target_layers;
                     const int64_t n_embd_target_features = n_target_layer_ids * n_embd;
 
                     fc = create_tensor(tn(LLM_TENSOR_DFLASH_FC, "weight"), {n_embd_target_features, n_embd}, 0);

@@ -1218,17 +1218,21 @@ void llama_context::set_dflash(const llama_model * model) {
 
     dflash.extract_layer_indices.assign(
             dflash_hparams.dflash_target_layer_ids.begin(),
-            dflash_hparams.dflash_target_layer_ids.end()
+            dflash_hparams.dflash_target_layer_ids.begin() + dflash_hparams.dflash_n_target_layers
             );
 
     dflash.extract_tensors.resize(dflash.extract_layer_indices.size(), nullptr);
 
-    LLAMA_LOG_INFO("%s: DFlash extraction enabled for layers [%d, %d, %d, %d, %d]\n", __func__,
-            dflash.extract_layer_indices[0],
-            dflash.extract_layer_indices[1],
-            dflash.extract_layer_indices[2],
-            dflash.extract_layer_indices[3],
-            dflash.extract_layer_indices[4]);
+    {
+        std::string s = "[";
+        for (size_t i = 0; i < dflash.extract_layer_indices.size(); ++i) {
+            if (i) s += ", ";
+            s += std::to_string(dflash.extract_layer_indices[i]);
+        }
+        s += "]";
+        LLAMA_LOG_INFO("%s: DFlash extraction enabled for %zu layers %s\n", __func__,
+                dflash.extract_layer_indices.size(), s.c_str());
+    }
 }
 
 const float * llama_context::get_dflash_target_features() const {
@@ -1372,7 +1376,7 @@ int llama_context::encode(const llama_batch & batch_inp) {
         if (model.arch == LLM_ARCH_EAGLE3) {
             n_embd = 3 * hparams.eagle3_target_hidden_size;
         } else if (model.arch == LLM_ARCH_DFLASH) {
-            n_embd = (int64_t) hparams.dflash_target_layer_ids.size() * hparams.n_embd;
+            n_embd = (int64_t) hparams.dflash_n_target_layers * hparams.n_embd;
         }
     }
     const int64_t n_vocab = model.vocab.n_tokens();

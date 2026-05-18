@@ -1,7 +1,7 @@
 #include "models.h"
 
 ggml_tensor * llm_build_dflash_encode::build_inp_embd() const {
-    const int64_t n_target_layer_ids = (int64_t) hparams.dflash_target_layer_ids.size();
+    const int64_t n_target_layer_ids = (int64_t) hparams.dflash_n_target_layers;
     const int64_t n_embd_target_features = n_target_layer_ids * n_embd;
 
     auto inp_target = std::make_unique<llm_graph_input_embd>(n_embd_target_features);
@@ -94,25 +94,39 @@ llm_build_dflash_decode::llm_build_dflash_decode(const llama_model & model, cons
         Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens_kv);
         Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens_kv);
 
-        Qcur = build_norm(Qcur, layer.attn_q_norm, NULL, LLM_NORM_RMS, il);
-        Kcur = build_norm(Kcur, layer.attn_k_norm, NULL, LLM_NORM_RMS, il);
-        cb(Qcur, "Qcur_normed", il);
-        cb(Kcur, "Kcur_normed", il);
+        auto apply_qk_norm = [&]() {
+            Qcur = build_norm(Qcur, layer.attn_q_norm, NULL, LLM_NORM_RMS, il);
+            Kcur = build_norm(Kcur, layer.attn_k_norm, NULL, LLM_NORM_RMS, il);
+            cb(Qcur, "Qcur_normed", il);
+            cb(Kcur, "Kcur_normed", il);
+        };
 
-        // RoPE: K uses full positions [0..n_ctx+n_tokens-1], Q uses last n_tokens
-        Kcur = ggml_rope_ext(
-                ctx0, Kcur, inp_pos_full, nullptr,
-                n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                ext_factor, attn_factor, beta_fast, beta_slow
-                );
-        cb(Kcur, "Kcur_rope", il);
+        auto apply_rope = [&]() {
+            // RoPE: K uses full positions [0..n_ctx+n_tokens-1], Q uses last n_tokens
+            Kcur = ggml_rope_ext(
+                    ctx0, Kcur, inp_pos_full, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
+            cb(Kcur, "Kcur_rope", il);
 
-        Qcur = ggml_rope_ext(
-                ctx0, Qcur, inp_pos_q, nullptr,
-                n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                ext_factor, attn_factor, beta_fast, beta_slow
-                );
-        cb(Qcur, "Qcur_rope", il);
+            Qcur = ggml_rope_ext(
+                    ctx0, Qcur, inp_pos_q, nullptr,
+                    n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                    ext_factor, attn_factor, beta_fast, beta_slow
+                    );
+            cb(Qcur, "Qcur_rope", il);
+        };
+
+        // POC Qwen3-style draft: QK-Norm before RoPE.
+        // HunYuan-style draft (e.g. hyocr-dflash): RoPE before QK-Norm — flag set in GGUF metadata.
+        if (hparams.dflash_qk_norm_after_rope) {
+            apply_rope();
+            apply_qk_norm();
+        } else {
+            apply_qk_norm();
+            apply_rope();
+        }
 
         // Full attention (no causal mask)
         ggml_build_forward_expand(gf, Qcur);

@@ -222,8 +222,10 @@ struct llama_hparams {
 
     // DFlash draft model
     std::array<int, 5> dflash_target_layer_ids = {};
+    uint32_t dflash_n_target_layers = 0;   // actual count in target_layer_ids; <= 5
     uint32_t dflash_block_size     = 16;
     uint32_t dflash_mask_token_id  = 0;
+    bool     dflash_qk_norm_after_rope = false;  // HunYuan-style: QK-Norm after RoPE
 
     // gemma4 per-layer embedding
     uint32_t n_embd_per_layer = 0;
