@@ -1471,8 +1471,10 @@ struct clip_model_loader {
                         hparams.image_resize_algo = RESIZE_ALGO_BICUBIC_PILLOW;
                         hparams.image_resize_pad = false;
                         hparams.ffn_op = FFN_GELU;
-                        get_u32(KEY_SPATIAL_MERGE_SIZE, hparams.n_merge, false);
                         hparams.set_limit_image_tokens(256, 16384);
+                        get_u32(KEY_SPATIAL_MERGE_SIZE, hparams.n_merge, false);
+                        get_u32(KEY_IMAGE_MIN_PIXELS, hparams.image_min_pixels, false);
+                        get_u32(KEY_IMAGE_MAX_PIXELS, hparams.image_max_pixels, false);
                         hparams.set_warmup_n_tokens(32*32);
                     } break;
                 case PROJECTOR_TYPE_LFM2A:
