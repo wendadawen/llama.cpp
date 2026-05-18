@@ -4887,7 +4887,7 @@ class Qwen3Model(Qwen2Model):
         yield from super().modify_tensors(data_torch, name, bid)
 
 
-@ModelBase.register("DFlashDraftModel")
+@ModelBase.register("DFlashDraftModel", "DFlashHunYuanDenseV1ForCausalLM")
 class DFlashModel(Qwen3Model):
     model_arch = gguf.MODEL_ARCH.DFLASH
 
@@ -4899,9 +4899,32 @@ class DFlashModel(Qwen3Model):
             )
         logger.info(f"DFLASH: Using tokenizer from target model: {self.target_model_dir}")
         original_dir = self.dir_model
+        original_hparams = self.hparams
         self.dir_model = self.target_model_dir
-        super().set_vocab()
-        self.dir_model = original_dir
+        # Reload hparams from the target so vocab logic (e.g. pad_token_id check
+        # below) reflects the target's tokenizer config rather than the draft's.
+        self.hparams = ModelBase.load_hparams(self.target_model_dir, is_mistral_format=False)
+        try:
+            # Some HunYuan-style targets (e.g. HunyuanOCR) ship config.json with
+            # pad_token_id = -1, which trips SpecialVocab. Mirror the guard from
+            # HunYuanModel.set_vocab so the pad slot is skipped instead of crashing.
+            if (self.hparams.get("pad_token_id") or 0) < 0:
+                tokens, toktypes, tokpre = self.get_vocab_base()
+                self.gguf_writer.add_tokenizer_model("gpt2")
+                self.gguf_writer.add_tokenizer_pre(tokpre)
+                self.gguf_writer.add_token_list(tokens)
+                self.gguf_writer.add_token_types(toktypes)
+                special_vocab = gguf.SpecialVocab(
+                    self.dir_model,
+                    load_merges=True,
+                    special_token_types=('bos', 'eos', 'unk', 'sep', 'cls', 'mask'),
+                )
+                special_vocab.add_to_gguf(self.gguf_writer)
+            else:
+                super().set_vocab()
+        finally:
+            self.dir_model = original_dir
+            self.hparams = original_hparams
 
     def set_gguf_parameters(self):
         super().set_gguf_parameters()
@@ -4915,6 +4938,12 @@ class DFlashModel(Qwen3Model):
         mask_token_id = dflash_config.get("mask_token_id", None)
         if mask_token_id is not None:
             self.gguf_writer.add_uint32(f"{self.gguf_writer.arch}.mask_token_id", mask_token_id)
+
+        # HunYuan-style draft (e.g. hyocr-dflash) applies QK-Norm AFTER RoPE,
+        # whereas the Qwen3-style POC applies QK-Norm BEFORE RoPE. Flag it so
+        # the C++ decoder graph can pick the right ordering.
+        if self.hparams.get("model_type") == "hunyuan_v1_dflash":
+            self.gguf_writer.add_bool(f"{self.gguf_writer.arch}.qk_norm_after_rope", True)
 
     def modify_tensors(self, data_torch: Tensor, name: str, bid: int | None) -> Iterable[tuple[str, Tensor]]:
         if name == "fc.weight":
