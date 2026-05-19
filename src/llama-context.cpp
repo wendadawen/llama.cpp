@@ -1284,6 +1284,15 @@ void llama_context::set_dflash_accumulated_target_ctx(const float * data, int32_
     std::memcpy(cross.v_embd.data(), data, real_size * sizeof(float));
 }
 
+void llama_context::set_dflash_prompt_pos(const int32_t * pos_array, int32_t n_text_tokens) {
+    dflash.prompt_text_pos.assign(pos_array, pos_array + n_text_tokens);
+}
+
+const int32_t * llama_context::get_dflash_prompt_pos(int32_t * n_text_tokens) const {
+    if (n_text_tokens) *n_text_tokens = (int32_t) dflash.prompt_text_pos.size();
+    return dflash.prompt_text_pos.empty() ? nullptr : dflash.prompt_text_pos.data();
+}
+
 llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {
     // DFlash decoder runs through encode path due to no kv-cache but it needs decoder graph type
     if (model.arch == LLM_ARCH_DFLASH && dflash_decoder_ctx && gtype == LLM_GRAPH_TYPE_ENCODER) {
@@ -3964,6 +3973,14 @@ int32_t llama_get_dflash_target_features_n_tokens(llama_context * ctx) {
 
 void llama_set_dflash_accumulated_target_ctx(llama_context * ctx, const float * data, int32_t n_embd, int32_t n_tokens) {
     ctx->set_dflash_accumulated_target_ctx(data, n_embd, n_tokens);
+}
+
+void llama_set_dflash_prompt_pos(llama_context * ctx, const int32_t * pos_array, int32_t n_text_tokens) {
+    ctx->set_dflash_prompt_pos(pos_array, n_text_tokens);
+}
+
+const int32_t * llama_get_dflash_prompt_pos(llama_context * ctx, int32_t * n_text_tokens) {
+    return ctx->get_dflash_prompt_pos(n_text_tokens);
 }
 
 

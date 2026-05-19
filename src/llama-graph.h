@@ -116,12 +116,26 @@ struct llama_dflash {
     // target_features[0 .. n_pos_used) as a contiguous prefix.
     int32_t n_pos_used = 0;
 
+    // Absolute positions of the text tokens that the spec layer cares about.
+    // For pure-text models this is just [0, 1, 2, ..., n-1]. For multimodal
+    // models like HunYuan-VL the prompt has image-patch slots interspersed
+    // with text-token slots; the spec layer only sees text tokens (image
+    // patches are filtered out into LLAMA_TOKEN_NULL by `get_text_tokens()`),
+    // so dflash needs an explicit map from "text-token index in prompt_tgt"
+    // to "absolute position in target_features buffer".
+    //
+    // Set by `llama_set_dflash_prompt_pos(ctx, pos_array, n)` from the server
+    // layer right after prefill completes; cleared on each new request via
+    // `clear()`.
+    std::vector<llama_pos> prompt_text_pos;
+
     std::vector<ggml_tensor *> extract_tensors;
 
     void clear() {
         target_features.clear();
         extract_tensors.clear();
         n_pos_used = 0;
+        prompt_text_pos.clear();
     }
 };
 

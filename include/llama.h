@@ -947,6 +947,26 @@ extern "C" {
                        int32_t   n_embd,
                        int32_t   n_tokens);
 
+    // Set the per-text-token absolute positions for DFlash speculative
+    // decoding. The dflash spec layer only sees text tokens (image patches
+    // filtered to LLAMA_TOKEN_NULL), but target_features is indexed by
+    // absolute pos in the full multimodal sequence — so the spec layer needs
+    // an explicit map from "text-token index" to "absolute pos in
+    // target_features". The server layer is the only place that knows this
+    // mapping, so it has to push it down into the target context after
+    // prefill.
+    //
+    // pos_array: array of length n_text_tokens with the absolute pos of each
+    // text token in the full prompt (image patches skipped).
+    LLAMA_API void llama_set_dflash_prompt_pos(struct llama_context * ctx,
+                                                const int32_t * pos_array,
+                                                int32_t n_text_tokens);
+
+    // Read back what was set (mostly for debugging / probe). Returns nullptr +
+    // n_text_tokens=0 if not set.
+    LLAMA_API const int32_t * llama_get_dflash_prompt_pos(struct llama_context * ctx,
+                                                          int32_t * n_text_tokens);
+
     //
     // Decoding
     //

@@ -194,6 +194,12 @@ public:
 
     llama_tokens get_text_tokens() const;
 
+    // For DFlash speculative decoding: returns the absolute pos of every text
+    // token (i.e. every entry in get_text_tokens()) in the multimodal sequence.
+    // Image-patch tokens are skipped. This map lets the dflash spec layer
+    // translate "text-token index" -> "absolute pos in target_features".
+    std::vector<llama_pos> get_text_token_positions() const;
+
     // for compatibility with speculative decoding
     void set_token(llama_pos pos, llama_token id);
 

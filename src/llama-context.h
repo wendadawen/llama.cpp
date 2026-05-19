@@ -244,6 +244,12 @@ public:
     // DFlash: Set accumulated target_ctx from encoder output for decoder input
     void set_dflash_accumulated_target_ctx(const float * data, int32_t n_embd, int32_t n_tokens);
 
+    // DFlash: Set the absolute-pos map for text tokens. Server layer pushes
+    // this in for multimodal prompts so the spec layer can translate its
+    // text-token index into the absolute pos in target_features.
+    void set_dflash_prompt_pos(const int32_t * pos_array, int32_t n_text_tokens);
+    const int32_t * get_dflash_prompt_pos(int32_t * n_text_tokens) const;
+
     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
 
 private:

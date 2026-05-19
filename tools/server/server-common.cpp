@@ -410,6 +410,47 @@ llama_tokens server_tokens::get_text_tokens() const {
     return res;
 }
 
+std::vector<llama_pos> server_tokens::get_text_token_positions() const {
+    // Walk the token list, tracking absolute pos as we go. Image-chunk
+    // entries advance pos by the chunk's n_pos but contribute no text tokens.
+    // Text tokens (LLAMA_TOKEN_NULL means image-occupied slot) record their
+    // current pos.
+    std::vector<llama_pos> res;
+    res.reserve(tokens.size());
+
+    if (!has_mtmd) {
+        // Pure text: pos == idx for every token.
+        for (size_t idx = 0; idx < tokens.size(); ++idx) {
+            if (tokens[idx] != LLAMA_TOKEN_NULL) {
+                res.push_back((llama_pos) idx);
+            }
+        }
+        return res;
+    }
+
+    size_t idx = 0;
+    llama_pos pos = 0;
+    while (idx < tokens.size()) {
+        const auto media_it = map_idx_to_media.find(idx);
+        if (media_it != map_idx_to_media.end()) {
+            const auto & chunk = media_it->second;
+            const llama_pos n_pos = mtmd_input_chunk_get_n_pos(chunk.get());
+            const size_t n_tok = mtmd_input_chunk_get_n_tokens(chunk.get());
+            pos += n_pos;
+            idx += n_tok;
+        } else {
+            // Text token (or LLAMA_TOKEN_NULL marker that wasn't a media chunk —
+            // shouldn't happen, but defensively skip).
+            if (tokens[idx] != LLAMA_TOKEN_NULL) {
+                res.push_back(pos);
+            }
+            pos++;
+            idx++;
+        }
+    }
+    return res;
+}
+
 void server_tokens::set_token(llama_pos pos, llama_token id) {
     GGML_ASSERT(!has_mtmd); // only allow this if mtmd is disabled
     tokens[pos] = id;

@@ -2922,6 +2922,19 @@ private:
 
                     if (slot.can_speculate()) {
                         common_speculative_begin(slot.spec.get(), slot.prompt.tokens.get_text_tokens());
+
+                        // For DFlash spec: push the text-token -> abs-pos map
+                        // into the target context so the spec layer can read
+                        // features by absolute pos in the multimodal sequence.
+                        // For pure-text models this is just [0..n-1] and the
+                        // spec layer's fallback path produces the same answer,
+                        // but pushing it explicitly is harmless and keeps the
+                        // dflash spec implementation simpler.
+                        const std::vector<llama_pos> text_pos = slot.prompt.tokens.get_text_token_positions();
+                        if (!text_pos.empty()) {
+                            std::vector<int32_t> pos_i32(text_pos.begin(), text_pos.end());
+                            llama_set_dflash_prompt_pos(slot.ctx, pos_i32.data(), (int32_t) pos_i32.size());
+                        }
                     }
                 } else if (slot.state != SLOT_STATE_GENERATING) {
                     continue; // continue loop of slots

@@ -784,16 +784,82 @@ struct common_speculative_state_dflash : public common_speculative_state {
         const int model_block_size = llama_model_dflash_block_size(llama_get_model(ctx_dft_dec));
         const int block_size       = std::min((int)params.n_max, model_block_size);
         const int n                = (int)prompt_tgt.size();
-        const int n_new            = n - dflash_n_past;
+        int       n_new            = n - dflash_n_past;
 
         GGML_ASSERT(n >= 1 && "prompt_tgt is empty");
         GGML_ASSERT(n_new >= 1 && "must have at least 1 new token");
 
-        // Step 1: Encode new accepted tokens' features
-        const float * features = llama_get_dflash_target_features(ctx_tgt);
+        // Step 1: Encode new accepted tokens' features.
+        //
+        // For multimodal targets (image + text), the dflash decoder was
+        // trained with cross context = ALL prefilled token hidden states
+        // (text and image-patch tokens alike). The spec framework, on the
+        // other hand, only sees text tokens (image patches are filtered to
+        // LLAMA_TOKEN_NULL by server_tokens::get_text_tokens()) — so the
+        // n_new derived from prompt_tgt.size() is much smaller than the
+        // total cross context the model expects.
+        //
+        // To bridge that, on the very first draft() call (dflash_n_past == 0)
+        // we feed the encoder a contiguous slice of every extracted abs-pos
+        // in [0, n_features_avail), regardless of whether each pos belongs to
+        // a text or image-patch token. On subsequent calls (dflash_n_past > 0)
+        // we use the text-pos map: each verified token only adds one hidden
+        // to the cross context, and we look up its absolute pos via
+        // prompt_text_pos[].
+        const float * features_base = llama_get_dflash_target_features(ctx_tgt);
+        const int32_t n_features_avail = llama_get_dflash_target_features_n_tokens(ctx_tgt);
+
+        int32_t n_text_pos = 0;
+        const int32_t * prompt_text_pos = llama_get_dflash_prompt_pos(ctx_tgt, &n_text_pos);
+
+        const int n_embd_target_features = llama_model_dflash_n_embd_target_features(llama_get_model(ctx_dft_enc));
+
+        std::vector<float> gathered;
+        const float * features = nullptr;
+        int32_t n_enc_tokens = 0;
+
+        if (dflash_n_past == 0) {
+            // First draft: encode the entire prefilled cross context, including
+            // image-patch positions. Use features_base directly (it is already
+            // a contiguous [n_features_avail, n_embd_target_features] block —
+            // pos is stored densely in target_features).
+            n_enc_tokens = n_features_avail;
+            features = features_base;
+            // We've consumed all the text-pos prefix in one shot; advance the
+            // text-token-domain n_new so dflash_n_past is bumped to n at end
+            // of draft() (so subsequent calls only encode the diff).
+            n_new = n;
+        } else {
+            // Subsequent draft: gather just the n_new tokens that were
+            // verified since last draft. They live at text-pos indices
+            // [dflash_n_past, dflash_n_past + n_new).
+            n_enc_tokens = n_new;
+            gathered.resize((size_t)n_new * (size_t)n_embd_target_features);
+            for (int i = 0; i < n_new; ++i) {
+                const int text_idx = dflash_n_past + i;
+                int32_t abs_pos;
+                if (prompt_text_pos != nullptr && text_idx < n_text_pos) {
+                    abs_pos = prompt_text_pos[text_idx];
+                } else if (prompt_text_pos != nullptr && n_text_pos > 0) {
+                    // Past end of prompt: continue with absolute positions
+                    // monotonically increasing by 1 per verified token.
+                    abs_pos = prompt_text_pos[n_text_pos - 1] + (text_idx - (n_text_pos - 1));
+                } else {
+                    // Pure text model — text idx == abs pos.
+                    abs_pos = text_idx;
+                }
+                GGML_ASSERT(abs_pos >= 0 && abs_pos < n_features_avail &&
+                            "DFlash: requested abs_pos out of range of extracted target features");
+                std::memcpy(
+                    gathered.data() + (size_t)i * (size_t)n_embd_target_features,
+                    features_base + (size_t)abs_pos * (size_t)n_embd_target_features,
+                    (size_t)n_embd_target_features * sizeof(float));
+            }
+            features = gathered.data();
+        }
 
         llama_batch enc_batch = {
-            /*.n_tokens  =*/ n_new,
+            /*.n_tokens  =*/ n_enc_tokens,
             /*.token     =*/ nullptr,
             /*.embd      =*/ const_cast<float*>(features),
             /*.pos       =*/ nullptr,
@@ -810,7 +876,7 @@ struct common_speculative_state_dflash : public common_speculative_state {
         GGML_ASSERT(target_ctx_new && "encoder output is null");
 
         // Step 2: Append to accumulated target_ctx and set on decoder context (writes to cross.v_embd)
-        const size_t new_size = (size_t)n_embd * n_new;
+        const size_t new_size = (size_t)n_embd * n_enc_tokens;
         accumulated_ctx.insert(accumulated_ctx.end(), target_ctx_new, target_ctx_new + new_size);
 
         const int n_ctx_total = (int)(accumulated_ctx.size() / n_embd);
