@@ -1293,6 +1293,20 @@ const int32_t * llama_context::get_dflash_prompt_pos(int32_t * n_text_tokens) co
     return dflash.prompt_text_pos.empty() ? nullptr : dflash.prompt_text_pos.data();
 }
 
+void llama_context::reset_dflash_target_features() {
+    // Zero target_features and reset n_pos_used so the next prefill starts
+    // from a clean slate. Server calls this when starting a new chat request.
+    // Without this, prefix-shared positions (e.g. chat header tokens 0..1)
+    // would still hold the previous request's hidden states because the
+    // server's prompt-cache reuse doesn't re-forward them.
+    if (!dflash.target_features.empty()) {
+        std::memset(dflash.target_features.data(), 0,
+                    dflash.target_features.size() * sizeof(float));
+    }
+    dflash.n_pos_used = 0;
+    dflash.prompt_text_pos.clear();
+}
+
 llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {
     // DFlash decoder runs through encode path due to no kv-cache but it needs decoder graph type
     if (model.arch == LLM_ARCH_DFLASH && dflash_decoder_ctx && gtype == LLM_GRAPH_TYPE_ENCODER) {
@@ -3981,6 +3995,10 @@ void llama_set_dflash_prompt_pos(llama_context * ctx, const int32_t * pos_array,
 
 const int32_t * llama_get_dflash_prompt_pos(llama_context * ctx, int32_t * n_text_tokens) {
     return ctx->get_dflash_prompt_pos(n_text_tokens);
+}
+
+void llama_reset_dflash_target_features(llama_context * ctx) {
+    ctx->reset_dflash_target_features();
 }
 
 

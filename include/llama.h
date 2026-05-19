@@ -967,6 +967,11 @@ extern "C" {
     LLAMA_API const int32_t * llama_get_dflash_prompt_pos(struct llama_context * ctx,
                                                           int32_t * n_text_tokens);
 
+    // Reset DFlash target_features bookkeeping for a new request. Server must
+    // call this before prefilling a new prompt so leftover features from the
+    // previous request don't contaminate the prefix-shared positions.
+    LLAMA_API void llama_reset_dflash_target_features(struct llama_context * ctx);
+
     //
     // Decoding
     //

@@ -2299,6 +2299,16 @@ private:
                         SLT_INF(slot, "new prompt, n_ctx_slot = %d, n_keep = %d, task.n_tokens = %d\n",
                                 slot.n_ctx, slot.task->params.n_keep, slot.task->n_tokens());
 
+                        // For DFlash: discard any leftover target_features
+                        // from the previous request. The server reuses the
+                        // common prompt prefix (e.g. chat header) without
+                        // re-running it through the target model, so without
+                        // this reset the dflash spec layer would read the
+                        // previous request's hidden states for those slots.
+                        // Cheap memset on a fixed-size buffer; harmless if
+                        // dflash isn't enabled (the buffer is empty then).
+                        llama_reset_dflash_target_features(slot.ctx);
+
                         // print prompt tokens (for debugging)
                         /*if (1) {
                             // first 16 tokens (avoid flooding logs)

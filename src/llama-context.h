@@ -250,6 +250,12 @@ public:
     void set_dflash_prompt_pos(const int32_t * pos_array, int32_t n_text_tokens);
     const int32_t * get_dflash_prompt_pos(int32_t * n_text_tokens) const;
 
+    // DFlash: Reset target_features bookkeeping for a new request. Zeros the
+    // buffer and resets n_pos_used. Server must call this before prefilling
+    // a new prompt, so leftover features from the previous request don't
+    // contaminate the prefix-shared positions.
+    void reset_dflash_target_features();
+
     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
 
 private:
