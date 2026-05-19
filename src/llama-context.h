@@ -235,6 +235,12 @@ public:
     // DFlash: Get pointer to target model features extracted for DFlash encoder
     const float * get_dflash_target_features() const;
 
+    // DFlash: Number of token-pos slots currently holding valid extracted features
+    // in target_features (i.e. positions [0, n) have been written by the most
+    // recent prefill). Spec layer uses this to ASSERT it doesn't read past the
+    // end of the buffer.
+    int32_t get_dflash_target_features_n_tokens() const;
+
     // DFlash: Set accumulated target_ctx from encoder output for decoder input
     void set_dflash_accumulated_target_ctx(const float * data, int32_t n_embd, int32_t n_tokens);
 

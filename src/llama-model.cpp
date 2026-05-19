@@ -9338,6 +9338,12 @@ int32_t llama_model_dflash_mask_token_id(const llama_model * model) {
     return (int32_t) model->hparams.dflash_mask_token_id;
 }
 
+int32_t llama_model_dflash_n_embd_target_features(const llama_model * model) {
+    // n_layers (extracted layers) * n_embd; this is the per-token stride into
+    // a context's dflash.target_features buffer.
+    return (int32_t)((int64_t) model->hparams.dflash_n_target_layers * (int64_t) model->hparams.n_embd);
+}
+
 uint32_t llama_model_n_cls_out(const struct llama_model * model) {
     return model->hparams.n_cls_out;
 }

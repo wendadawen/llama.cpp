@@ -101,13 +101,27 @@ struct llama_eagle3 {
 struct llama_dflash {
     std::vector<int> extract_layer_indices;
 
+    // Hidden features per token, addressed by token position. Layout:
+    //   target_features[ pos * n_embd_concat + layer_idx * n_embd + e ]
+    // where n_embd_concat = n_embd * extract_layer_indices.size().
+    //
+    // Sized once at ctor to cparams.n_ctx (the maximum pos any spec call will
+    // ask for) and zero-filled, so out-of-range reads can never load junk.
+    // Each prefill / verify ubatch writes by ubatch.pos[i] into the matching
+    // slot, regardless of which batch a token arrives in.
     std::vector<float> target_features;
+
+    // Highest (pos + 1) ever written, i.e. how many tokens of the prompt have
+    // had their hidden states extracted so far. spec layer reads
+    // target_features[0 .. n_pos_used) as a contiguous prefix.
+    int32_t n_pos_used = 0;
 
     std::vector<ggml_tensor *> extract_tensors;
 
     void clear() {
         target_features.clear();
         extract_tensors.clear();
+        n_pos_used = 0;
     }
 };
 

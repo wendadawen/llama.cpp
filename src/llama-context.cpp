@@ -1223,6 +1223,21 @@ void llama_context::set_dflash(const llama_model * model) {
 
     dflash.extract_tensors.resize(dflash.extract_layer_indices.size(), nullptr);
 
+    // Pre-size target_features to the full ctx capacity, indexed by token pos.
+    // This gives us a stable buffer with no resize() during prefill/verify; any
+    // pos in [0, n_ctx) can be written without reallocating. Zero-filled so
+    // out-of-range reads (e.g. pre-prefill probe) get deterministic zeros.
+    {
+        const int64_t n_embd = model->hparams.n_embd;
+        const size_t n_layers = dflash.extract_layer_indices.size();
+        const size_t n_embd_concat = (size_t)n_embd * n_layers;
+        const size_t buffer_floats = n_embd_concat * (size_t)cparams.n_ctx;
+        dflash.target_features.assign(buffer_floats, 0.0f);
+        dflash.n_pos_used = 0;
+        LLAMA_LOG_INFO("%s: DFlash target_features pre-allocated %zu floats (%lld pos x %zu n_embd_concat)\n",
+                __func__, buffer_floats, (long long)cparams.n_ctx, n_embd_concat);
+    }
+
     {
         std::string s = "[";
         for (size_t i = 0; i < dflash.extract_layer_indices.size(); ++i) {
@@ -1236,8 +1251,17 @@ void llama_context::set_dflash(const llama_model * model) {
 }
 
 const float * llama_context::get_dflash_target_features() const {
-    GGML_ASSERT(!dflash.target_features.empty() && "DFlash target features not extracted");
+    GGML_ASSERT(!dflash.target_features.empty() &&
+                "DFlash target_features buffer not pre-allocated; set_dflash() must be called first");
+    GGML_ASSERT(dflash.n_pos_used > 0 && "DFlash target_features has no extracted tokens yet");
     return dflash.target_features.data();
+}
+
+int32_t llama_context::get_dflash_target_features_n_tokens() const {
+    // target_features is a fixed-size buffer indexed by token pos; n_pos_used
+    // tracks how many positions have valid data written into them (i.e. token
+    // positions [0, n_pos_used) are valid, the rest are zero).
+    return dflash.n_pos_used;
 }
 
 void llama_context::set_dflash_accumulated_target_ctx(const float * data, int32_t n_embd, int32_t n_tokens) {
@@ -2509,8 +2533,20 @@ void llama_context::extract_dflash_features(const llama_ubatch & ubatch) {
     const int64_t n_embd = model.hparams.n_embd;
     const size_t n_layers = dflash.extract_tensors.size();
 
-    const int64_t n_embd_concat = n_embd * n_layers;
-    dflash.target_features.resize(n_embd_concat * n_tokens);
+    const size_t n_embd_concat = (size_t)n_embd * n_layers;
+
+    // Write features by ubatch.pos[i] into the pre-allocated fixed buffer
+    // (sized in set_dflash() ctor to cparams.n_ctx * n_embd_concat). The
+    // previous behavior was to resize() the buffer to exactly ubatch.n_tokens
+    // and write tokens sequentially, which broke when the spec layer's
+    // n_new exceeded the most recent ubatch's n_tokens (e.g. multi-chunk
+    // prefill where the last chunk is short): the spec layer would read past
+    // the buffer end.
+    GGML_ASSERT(!dflash.target_features.empty() &&
+                "DFlash target_features buffer not pre-allocated; set_dflash() must be called first");
+    GGML_ASSERT(dflash.target_features.size() == n_embd_concat * (size_t)cparams.n_ctx &&
+                "DFlash target_features size must equal cparams.n_ctx * n_embd_concat");
+    GGML_ASSERT(ubatch.pos != nullptr && "DFlash extract requires ubatch.pos");
 
     static thread_local std::vector<float> temp_layer_features;
     temp_layer_features.resize(n_embd * n_tokens);
@@ -2533,9 +2569,27 @@ void llama_context::extract_dflash_features(const llama_ubatch & ubatch) {
         ggml_backend_sched_synchronize(sched.get());
 
         for (int64_t token_idx = 0; token_idx < n_tokens; ++token_idx) {
+            // ubatch.pos is laid out as [pos_dim_0, pos_dim_1, ...] each of
+            // size n_tokens. Dim 0 is the sequential position; higher dims are
+            // M-RoPE axes that share the same sequential pos for non-image
+            // text tokens (multimodal models). We use dim 0.
+            const llama_pos pos = ubatch.pos[token_idx];
+            if (pos < 0 || pos >= (llama_pos)cparams.n_ctx) {
+                // Defensively skip — would only happen if a model exceeds the
+                // configured context. spec layer never reaches here.
+                continue;
+            }
             const float * src = temp_layer_features.data() + token_idx * n_embd;
-            float * dest = dflash.target_features.data() + token_idx * n_embd_concat + layer_idx * n_embd;
+            float * dest = dflash.target_features.data() + (size_t)pos * n_embd_concat + layer_idx * n_embd;
             std::memcpy(dest, src, n_embd * sizeof(float));
+
+            if (layer_idx + 1 == n_layers) {
+                // Last layer's write — bump n_pos_used so the spec layer
+                // knows how many positions are valid.
+                if (pos + 1 > dflash.n_pos_used) {
+                    dflash.n_pos_used = pos + 1;
+                }
+            }
         }
     }
 }
@@ -3902,6 +3956,10 @@ void llama_set_eagle3_g_embeddings(llama_context * ctx, const float * g_embd, in
 
 const float * llama_get_dflash_target_features(llama_context * ctx) {
     return ctx->get_dflash_target_features();
+}
+
+int32_t llama_get_dflash_target_features_n_tokens(llama_context * ctx) {
+    return ctx->get_dflash_target_features_n_tokens();
 }
 
 void llama_set_dflash_accumulated_target_ctx(llama_context * ctx, const float * data, int32_t n_embd, int32_t n_tokens) {

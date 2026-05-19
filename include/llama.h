@@ -564,6 +564,10 @@ extern "C" {
     // DFlash draft model: mask token id used as filler in the noise block
     LLAMA_API int32_t llama_model_dflash_mask_token_id(const struct llama_model * model);
 
+    // DFlash draft model: per-token stride (in floats) into a target context's
+    // dflash.target_features buffer. Equals n_target_layers * n_embd.
+    LLAMA_API int32_t llama_model_dflash_n_embd_target_features(const struct llama_model * model);
+
     // Get the model's RoPE frequency scaling factor
     LLAMA_API float llama_model_rope_freq_scale_train(const struct llama_model * model);
 
@@ -930,6 +934,11 @@ extern "C" {
             const struct llama_model * model);
 
     LLAMA_API const float * llama_get_dflash_target_features(struct llama_context * ctx);
+
+    // Number of token-pos slots currently holding valid extracted features in
+    // the target context's dflash.target_features buffer. Spec layer uses
+    // this to ASSERT it doesn't read past the end of the buffer.
+    LLAMA_API int32_t llama_get_dflash_target_features_n_tokens(struct llama_context * ctx);
 
     // Set accumulated target_ctx for DFlash decoder
     LLAMA_API void llama_set_dflash_accumulated_target_ctx(
