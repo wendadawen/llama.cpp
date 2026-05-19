@@ -763,6 +763,15 @@ struct common_speculative_state_dflash : public common_speculative_state {
 
     void begin(const llama_tokens & prompt) override {
         GGML_UNUSED(prompt);
+        // Reset per-request state so the slot can serve multiple chat
+        // completions without carrying the previous request's accumulated
+        // target context. Without this, the second request's first draft()
+        // call would compute n_new = prompt.size() - dflash_n_past_OLD,
+        // which is wrong because dflash_n_past corresponds to the previous
+        // request's text-token count, and accumulated_ctx still holds
+        // encoded cross-features from the previous prompt.
+        dflash_n_past = 0;
+        accumulated_ctx.clear();
     }
 
     void draft(

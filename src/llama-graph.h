@@ -292,9 +292,17 @@ public:
 
     void set_input(const llama_ubatch * ubatch) override;
 
+    // n_enc changes every dflash draft step (the accumulated target context grows
+    // by the number of accepted tokens). Forcing rebuild ensures the graph's
+    // cross_embd tensor matches cross->n_enc — otherwise attention attends a
+    // fixed reserved [n_embd, cparams.n_ctx] window that mostly contains zeros,
+    // diluting softmax weights and producing near-zero attention output.
+    bool can_reuse(const llm_graph_params & params) override;
+
     ggml_tensor * cross_embd; // F32 [n_embd, n_outputs_enc]
 
     const llama_cross * cross;
+    int64_t cached_n_enc = -1;
 };
 
 class llm_graph_input_attn_no_cache : public llm_graph_input_i {

@@ -1242,12 +1242,22 @@ const float * llama_context::get_dflash_target_features() const {
 
 void llama_context::set_dflash_accumulated_target_ctx(const float * data, int32_t n_embd, int32_t n_tokens) {
     GGML_ASSERT(data != nullptr);
-    const size_t size = (size_t)n_embd * n_tokens;
-    // Store in cross struct (reusing T5 style cross-attention for accumulated target features fed to the DFlash decoder)
+    // Store in cross struct (reusing T5 style cross-attention for accumulated
+    // target features fed to the DFlash decoder). The buffer is pre-allocated
+    // in the llama_context ctor to cparams.n_ctx * n_embd; we do NOT resize
+    // it here, because the graph-input setter (llm_graph_input_cross_embd)
+    // copies ggml_nbytes(cross_embd) bytes from cross.v_embd.data() into a
+    // reserved backend tensor, and that tensor's nbytes is determined by the
+    // graph build at the maximum reserved n_enc — not by the current value.
+    // Resizing v_embd smaller (the previous behavior) caused that copy to
+    // read past the end of the live data and into vector capacity-region
+    // junk, silently corrupting the cross context for the dflash decoder.
     cross.n_embd = n_embd;
     cross.n_enc  = n_tokens;
-    cross.v_embd.resize(size);
-    std::memcpy(cross.v_embd.data(), data, size * sizeof(float));
+    const size_t real_size = (size_t)n_embd * n_tokens;
+    GGML_ASSERT(cross.v_embd.size() >= real_size &&
+                "cross.v_embd must be pre-sized to cparams.n_ctx in the ctor");
+    std::memcpy(cross.v_embd.data(), data, real_size * sizeof(float));
 }
 
 llm_graph_result * llama_context::process_ubatch(const llama_ubatch & ubatch, llm_graph_type gtype, llama_memory_context_i * mctx, ggml_status & ret) {

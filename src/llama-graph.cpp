@@ -341,6 +341,21 @@ void llm_graph_input_cross_embd::set_input(const llama_ubatch * ubatch) {
 
         ggml_backend_tensor_set(cross_embd, cross->v_embd.data(), 0, ggml_nbytes(cross_embd));
     }
+    // Record the n_enc this graph was built for so can_reuse() can detect when
+    // cross->n_enc has grown / shrunk and force a rebuild.
+    cached_n_enc = cross_embd ? cross_embd->ne[1] : -1;
+}
+
+bool llm_graph_input_cross_embd::can_reuse(const llm_graph_params & params) {
+    GGML_UNUSED(params);
+    if (!cross_embd) return true;
+    // The graph's cross_embd tensor was allocated with shape [n_embd, cached_n_enc].
+    // If cross->n_enc has changed since then, the graph topology no longer matches
+    // and we must rebuild — otherwise attention would attend a stale, mostly-empty
+    // window. cached_n_enc < 0 means set_input() hasn't run yet (fresh graph), in
+    // which case the just-built graph is by definition correct.
+    if (cached_n_enc < 0) return true;
+    return (int64_t)cross->n_enc == cached_n_enc;
 }
 
 static void print_mask(const float * data, int64_t n_tokens, int64_t n_kv, int64_t n_swa, llama_swa_type swa_type) {
